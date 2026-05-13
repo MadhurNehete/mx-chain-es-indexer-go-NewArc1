@@ -7,7 +7,6 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/multiversx/mx-chain-es-indexer-go/core"
 	indexer "github.com/multiversx/mx-chain-es-indexer-go/process/dataindexer"
 	"github.com/multiversx/mx-chain-es-indexer-go/templates"
 	"github.com/multiversx/mx-chain-es-indexer-go/templates/indices"
@@ -72,6 +71,13 @@ func (tr *templatesAndPolicyReader) GetElasticTemplatesAndPolicies() (map[string
 	indexTemplates[indexer.ValuesIndex] = indices.Values.ToBuffer()
 	indexTemplates[indexer.EventsIndex] = indices.Events.ToBuffer()
 	indexTemplates[indexer.ExecutionResultsIndex] = indices.ExecutionResults.ToBuffer()
+
+	indexTemplates[indexer.DrwaDenialsIndex] = indices.DrwaDenials.ToBuffer()
+	indexTemplates[indexer.DrwaIdentitiesIndex] = indices.DrwaIdentities.ToBuffer()
+	indexTemplates[indexer.DrwaHolderComplianceIndex] = indices.DrwaHolderCompliance.ToBuffer()
+	indexTemplates[indexer.DrwaAttestationsIndex] = indices.DrwaAttestations.ToBuffer()
+	indexTemplates[indexer.DrwaTokenPoliciesIndex] = indices.DrwaTokenPolicies.ToBuffer()
+	indexTemplates[indexer.DrwaControlEventsIndex] = indices.DrwaControlEvents.ToBuffer()
 
 	return indexTemplates, indexPolicies, nil
 }
@@ -193,13 +199,13 @@ func getDataFromByIndex(path string, index string) (*bytes.Buffer, error) {
 	filePath := filepath.Join(path, fileName)
 	fileBytes, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("getDataFromByIndex: %w, path %s, error %s", err, filePath, core.SanitizeLogError(err))
+		return nil, fmt.Errorf("getDataFromByIndex: %w, path %s, error %s", err, filePath, err.Error())
 	}
 
 	indexTemplate.Grow(len(fileBytes))
 	_, err = indexTemplate.Write(fileBytes)
 	if err != nil {
-		return nil, fmt.Errorf("getDataFromByIndex: %w, path %s, error %s", err, filePath, core.SanitizeLogError(err))
+		return nil, fmt.Errorf("getDataFromByIndex: %w, path %s, error %s", err, filePath, err.Error())
 	}
 
 	return indexTemplate, nil

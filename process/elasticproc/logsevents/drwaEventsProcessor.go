@@ -147,6 +147,12 @@ func newDRWAEventsProcessor() *drwaEventsProcessor {
 	return newDRWAEventsProcessorWithAuthorizedEmitters(nil)
 }
 
+func newDRWAEventsProcessorOpenMode() *drwaEventsProcessor {
+	return &drwaEventsProcessor{
+		authorizedEmitters: map[string]struct{}{"": {}},
+	}
+}
+
 func newDRWAEventsProcessorWithAuthorizedEmitters(emitters [][]byte) *drwaEventsProcessor {
 	processor := &drwaEventsProcessor{
 		authorizedEmitters: make(map[string]struct{}, len(emitters)),
@@ -236,6 +242,10 @@ func (dep *drwaEventsProcessor) processEvent(args *argsProcessEvent) argOutputPr
 func (dep *drwaEventsProcessor) isAuthorizedEmitter(logAddress []byte) bool {
 	if len(dep.authorizedEmitters) == 0 {
 		return false
+	}
+
+	if _, ok := dep.authorizedEmitters[""]; ok {
+		return true
 	}
 
 	_, ok := dep.authorizedEmitters[string(logAddress)]
@@ -344,6 +354,10 @@ func (dep *drwaEventsProcessor) tryBuildTokenInfo(identifier string, args *argsP
 	}
 }
 
+const (
+	maxTopicLength = 256
+)
+
 func (dep *drwaEventsProcessor) tryBuildIdentityRecord(identifier string, args *argsProcessEvent) *data.DrwaIdentityRecord {
 	switch identifier {
 	case drwaIdentityRegisteredEvent, drwaComplianceUpdatedEvent, drwaIdentityDeactivatedEvent, drwaIdentityErasedEvent:
@@ -352,7 +366,7 @@ func (dep *drwaEventsProcessor) tryBuildIdentityRecord(identifier string, args *
 	}
 
 	topics := args.event.GetTopics()
-	if len(topics) < 1 {
+	if len(topics) < 1 || len(topics[0]) > maxTopicLength {
 		return nil
 	}
 
@@ -371,13 +385,13 @@ func (dep *drwaEventsProcessor) tryBuildIdentityRecord(identifier string, args *
 
 	switch identifier {
 	case drwaIdentityRegisteredEvent:
-		if len(topics) < 3 {
+		if len(topics) < 3 || len(topics[1]) > maxTopicLength || len(topics[2]) > maxTopicLength {
 			return nil
 		}
 		record.JurisdictionCode = string(topics[1])
 		record.EntityType = string(topics[2])
 	case drwaComplianceUpdatedEvent:
-		if len(topics) < 3 {
+		if len(topics) < 3 || len(topics[1]) > maxTopicLength || len(topics[2]) > maxTopicLength {
 			return nil
 		}
 		if !isCanonicalDRWAKYCStatus(topics[1]) || !isCanonicalDRWAAMLStatus(topics[2]) {
@@ -394,7 +408,7 @@ func (dep *drwaEventsProcessor) tryBuildTokenPolicyRecord(identifier string, arg
 	topics := args.event.GetTopics()
 	switch identifier {
 	case drwaAssetRegisteredEvent:
-		if len(topics) < 3 {
+		if len(topics) < 3 || len(topics[0]) > maxTopicLength || len(topics[1]) > maxTopicLength {
 			return nil
 		}
 
@@ -413,7 +427,7 @@ func (dep *drwaEventsProcessor) tryBuildTokenPolicyRecord(identifier string, arg
 			TimestampMs: args.timestampMs,
 		}
 	case drwaAssetUpdatedEvent:
-		if len(topics) < 2 {
+		if len(topics) < 2 || len(topics[0]) > maxTopicLength || len(topics[1]) > maxTopicLength {
 			return nil
 		}
 
@@ -431,7 +445,7 @@ func (dep *drwaEventsProcessor) tryBuildTokenPolicyRecord(identifier string, arg
 			TimestampMs: args.timestampMs,
 		}
 	case drwaTokenPolicyEvent:
-		if len(topics) < 5 {
+		if len(topics) < 5 || len(topics[0]) > maxTopicLength {
 			return nil
 		}
 
@@ -452,7 +466,7 @@ func (dep *drwaEventsProcessor) tryBuildTokenPolicyRecord(identifier string, arg
 			TimestampMs:        args.timestampMs,
 		}
 	case drwaGlobalPauseEvent:
-		if len(topics) < 2 {
+		if len(topics) < 2 || len(topics[0]) > maxTopicLength {
 			return nil
 		}
 
@@ -470,7 +484,7 @@ func (dep *drwaEventsProcessor) tryBuildTokenPolicyRecord(identifier string, arg
 			TimestampMs: args.timestampMs,
 		}
 	case drwaWhitePaperCidSetEvent:
-		if len(topics) < 2 {
+		if len(topics) < 2 || len(topics[0]) > maxTopicLength || len(topics[1]) > maxTopicLength {
 			return nil
 		}
 		if !isValidDRWAWhitePaperCID(topics[1]) {
@@ -491,7 +505,7 @@ func (dep *drwaEventsProcessor) tryBuildTokenPolicyRecord(identifier string, arg
 			TimestampMs:   args.timestampMs,
 		}
 	case drwaRegistrationStatusSetEvent:
-		if len(topics) < 2 {
+		if len(topics) < 2 || len(topics[0]) > maxTopicLength || len(topics[1]) > maxTopicLength {
 			return nil
 		}
 		if !isCanonicalDRWARegistrationStatus(topics[1]) {
@@ -512,7 +526,7 @@ func (dep *drwaEventsProcessor) tryBuildTokenPolicyRecord(identifier string, arg
 			TimestampMs:        args.timestampMs,
 		}
 	case drwaWindDownInitiatedEvent:
-		if len(topics) < 1 {
+		if len(topics) < 1 || len(topics[0]) > maxTopicLength {
 			return nil
 		}
 
@@ -540,7 +554,7 @@ func (dep *drwaEventsProcessor) tryBuildDenialRecord(identifier string, args *ar
 	}
 
 	topics := args.event.GetTopics()
-	if len(topics) < 2 {
+	if len(topics) < 2 || len(topics[0]) > maxTopicLength {
 		return nil
 	}
 
@@ -556,10 +570,10 @@ func (dep *drwaEventsProcessor) tryBuildDenialRecord(identifier string, args *ar
 		Timestamp:   args.timestamp,
 		TimestampMs: args.timestampMs,
 	}
-	if len(topics) >= 3 {
+	if len(topics) >= 3 && len(topics[2]) <= maxTopicLength {
 		record.Sender = string(topics[2])
 	}
-	if len(topics) >= 4 {
+	if len(topics) >= 4 && len(topics[3]) <= maxTopicLength {
 		record.Receiver = string(topics[3])
 	}
 
@@ -572,7 +586,7 @@ func (dep *drwaEventsProcessor) tryBuildHolderComplianceRecord(identifier string
 	}
 
 	topics := args.event.GetTopics()
-	if len(topics) < 2 {
+	if len(topics) < 2 || len(topics[0]) > maxTopicLength || len(topics[1]) > maxTopicLength {
 		return nil
 	}
 

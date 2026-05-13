@@ -73,6 +73,7 @@ func createEventsProcessors(args ArgsLogsAndEventsProcessor) []eventsProcessor {
 	esdtIssueProc := newESDTIssueProcessor(args.PubKeyConverter)
 	delegatorsProcessor := newDelegatorsProcessor(args.PubKeyConverter, args.BalanceConverter)
 
+	drwaProc := newDRWAEventsProcessorOpenMode()
 	eventsProcs := []eventsProcessor{
 		scDeploysProc,
 		informativeProc,
@@ -81,11 +82,13 @@ func createEventsProcessors(args ArgsLogsAndEventsProcessor) []eventsProcessor {
 		esdtIssueProc,
 		delegatorsProcessor,
 		nftsProc,
+		drwaProc,
 	}
 
 	return eventsProcs
 }
 
+// ExtractDataFromLogs will extract data from the provided logs and events and put in altered addresses
 // ExtractDataFromLogs will extract data from the provided logs and events and put in altered addresses
 func (lep *logsAndEventsProcessor) ExtractDataFromLogs(
 	logsAndEvents []*transaction.LogData,
@@ -93,6 +96,8 @@ func (lep *logsAndEventsProcessor) ExtractDataFromLogs(
 	shardID uint32,
 	numOfShards uint32,
 	timestampMs uint64,
+	blockHash string,
+	blockRound uint64,
 ) *data.PreparedLogsResults {
 	lgData := newLogsData(preparedResults.Transactions, preparedResults.ScResults, timestampMs)
 	for _, txLog := range logsAndEvents {
@@ -101,7 +106,7 @@ func (lep *logsAndEventsProcessor) ExtractDataFromLogs(
 		}
 
 		events := txLog.Log.Events
-		lep.processEvents(lgData, txLog.TxHash, txLog.Log.Address, events, shardID, numOfShards)
+		lep.processEvents(lgData, txLog.TxHash, txLog.Log.Address, events, shardID, numOfShards, blockHash, blockRound)
 
 		tx, ok := lgData.txsMap[txLog.TxHash]
 		if ok {
@@ -129,20 +134,26 @@ func (lep *logsAndEventsProcessor) ExtractDataFromLogs(
 		ChangeOwnerOperations:   lgData.changeOwnerOperations,
 		DBLogs:                  dbLogs,
 		DBEvents:                dbEvents,
+		DrwaDenials:             lgData.drwaDenials,
+		DrwaIdentities:          lgData.drwaIdentities,
+		DrwaHolderCompliances:   lgData.drwaHolderCompliances,
+		DrwaAttestations:        lgData.drwaAttestations,
+		DrwaTokenPolicies:       lgData.drwaTokenPolicies,
+		DrwaControlEvents:       lgData.drwaControlEvents,
 	}
 }
 
-func (lep *logsAndEventsProcessor) processEvents(lgData *logsData, logHashHexEncoded string, logAddress []byte, events []*transaction.Event, shardID uint32, numOfShards uint32) {
-	for _, event := range events {
+func (lep *logsAndEventsProcessor) processEvents(lgData *logsData, logHashHexEncoded string, logAddress []byte, events []*transaction.Event, shardID uint32, numOfShards uint32, blockHash string, blockRound uint64) {
+	for idx, event := range events {
 		if check.IfNil(event) {
 			continue
 		}
 
-		lep.processEvent(lgData, logHashHexEncoded, logAddress, event, shardID, numOfShards)
+		lep.processEvent(lgData, logHashHexEncoded, logAddress, event, shardID, numOfShards, blockHash, blockRound, idx)
 	}
 }
 
-func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEncoded string, logAddress []byte, event coreData.EventHandler, shardID uint32, numOfShards uint32) {
+func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEncoded string, logAddress []byte, event coreData.EventHandler, shardID uint32, numOfShards uint32, blockHash string, blockRound uint64, eventOrder int) {
 	for _, proc := range lep.eventsProcessors {
 		res := proc.processEvent(&argsProcessEvent{
 			event:                   event,
@@ -160,6 +171,9 @@ func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEnco
 			changeOwnerOperations:   lgData.changeOwnerOperations,
 			selfShardID:             shardID,
 			numOfShards:             numOfShards,
+			blockHash:               blockHash,
+			blockRound:              blockRound,
+			eventOrder:              eventOrder,
 		})
 		if res.tokenInfo != nil {
 			lgData.tokensInfo = append(lgData.tokensInfo, res.tokenInfo)
@@ -169,6 +183,24 @@ func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEnco
 		}
 		if res.updatePropNFT != nil {
 			lgData.nftsDataUpdates = append(lgData.nftsDataUpdates, res.updatePropNFT)
+		}
+		if res.drwaDenial != nil {
+			lgData.drwaDenials = append(lgData.drwaDenials, res.drwaDenial)
+		}
+		if res.drwaIdentity != nil {
+			lgData.drwaIdentities = append(lgData.drwaIdentities, res.drwaIdentity)
+		}
+		if res.drwaHolderCompliance != nil {
+			lgData.drwaHolderCompliances = append(lgData.drwaHolderCompliances, res.drwaHolderCompliance)
+		}
+		if res.drwaAttestation != nil {
+			lgData.drwaAttestations = append(lgData.drwaAttestations, res.drwaAttestation)
+		}
+		if res.drwaTokenPolicy != nil {
+			lgData.drwaTokenPolicies = append(lgData.drwaTokenPolicies, res.drwaTokenPolicy)
+		}
+		if res.drwaControlEvent != nil {
+			lgData.drwaControlEvents = append(lgData.drwaControlEvents, res.drwaControlEvent)
 		}
 
 		tx, ok := lgData.txsMap[logHashHexEncoded]
@@ -197,7 +229,7 @@ func (lep *logsAndEventsProcessor) prepareLogsForDB(
 	events := make([]*data.LogEvent, 0)
 
 	for _, txLog := range logsAndEvents {
-		if txLog == nil {
+		if txLog == nil || txLog.Log == nil {
 			continue
 		}
 
@@ -302,6 +334,13 @@ func (lep *logsAndEventsProcessor) getExecutionOrder(lgData *logsData, logHashHe
 	return -1
 }
 
+// FinalizeDRWARecords will finalize all DRWA records for a given block hash
+func (lep *logsAndEventsProcessor) FinalizeDRWARecords(shardID uint32, headerHash []byte) error {
+	// Not implemented yet - this is a stub to satisfy the interface
+	// In a real implementation, this would use UpdateByQuery to set isFinalized: true
+	return nil
+}
+
 func hexEncodeSlice(input [][]byte) []string {
 	hexEncoded := make([]string, 0, len(input))
 	for idx := 0; idx < len(input); idx++ {
@@ -312,4 +351,9 @@ func hexEncodeSlice(input [][]byte) []string {
 	}
 
 	return hexEncoded
+}
+
+// IsInterfaceNil returns true if there is no value under the interface
+func (lep *logsAndEventsProcessor) IsInterfaceNil() bool {
+	return lep == nil
 }

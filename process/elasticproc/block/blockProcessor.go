@@ -14,7 +14,6 @@ import (
 	"github.com/multiversx/mx-chain-core-go/data/outport"
 	"github.com/multiversx/mx-chain-core-go/hashing"
 	"github.com/multiversx/mx-chain-core-go/marshal"
-	esindexercore "github.com/multiversx/mx-chain-es-indexer-go/core"
 	"github.com/multiversx/mx-chain-es-indexer-go/data"
 	indexer "github.com/multiversx/mx-chain-es-indexer-go/process/dataindexer"
 	"github.com/multiversx/mx-chain-es-indexer-go/process/elasticproc/converters"
@@ -524,7 +523,7 @@ func computeBlockSearchOrder(header coreData.HeaderHandler) uint64 {
 	order, err := strconv.ParseUint(stringOrder, 10, 64)
 	if err != nil {
 		log.Debug("elasticsearchDatabase.computeBlockSearchOrder",
-			"could not set uint32 search order", esindexercore.SanitizeLogError(err))
+			"could not set uint32 search order", err.Error())
 		return 0
 	}
 

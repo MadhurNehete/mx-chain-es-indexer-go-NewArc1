@@ -8,7 +8,6 @@ import (
 
 	"github.com/elastic/go-elasticsearch/v7"
 	"github.com/elastic/go-elasticsearch/v7/esapi"
-	"github.com/multiversx/mx-chain-es-indexer-go/core"
 	"github.com/multiversx/mx-chain-es-indexer-go/process/dataindexer"
 	logger "github.com/multiversx/mx-chain-logger-go"
 )
@@ -145,7 +144,7 @@ func (ec *elasticClient) DoBulkRequest(ctx context.Context, buff *bytes.Buffer, 
 		options...,
 	)
 	if err != nil {
-		log.Warn("elasticClient.DoBulkRequest", "error", core.SanitizeLogError(err))
+		log.Warn("elasticClient.DoBulkRequest", "error", err.Error())
 		return err
 	}
 
@@ -166,13 +165,13 @@ func (ec *elasticClient) DoMultiGet(ctx context.Context, ids []string, index str
 		ec.client.Mget.WithContext(ctx),
 	)
 	if err != nil {
-		log.Warn("elasticClient.DoMultiGet", "error", core.SanitizeLogError(err))
+		log.Warn("elasticClient.DoMultiGet", "error", err.Error())
 		return err
 	}
 
 	err = parseResponse(res, &resBody, elasticDefaultErrorResponseHandler)
 	if err != nil {
-		log.Warn("elasticClient.DoMultiGet", "error parsing response", core.SanitizeLogError(err))
+		log.Warn("elasticClient.DoMultiGet", "error parsing response", err.Error())
 		return err
 	}
 
@@ -328,9 +327,15 @@ func (ec *elasticClient) getWriteIndex(alias string) (string, bool, error) {
 
 // UpdateByQuery will update all the documents that match the provided query from the provided index
 func (ec *elasticClient) UpdateByQuery(ctx context.Context, index string, buff *bytes.Buffer) error {
+	err := ec.doRefresh(index)
+	if err != nil {
+		log.Warn("elasticClient.doRefresh", "cannot do refresh", err)
+	}
+
 	res, err := ec.client.UpdateByQuery(
 		[]string{index},
 		ec.client.UpdateByQuery.WithBody(buff),
+		ec.client.UpdateByQuery.WithConflicts(esConflictsPolicy),
 		ec.client.UpdateByQuery.WithContext(ctx),
 	)
 	if err != nil {

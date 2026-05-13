@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/multiversx/mx-chain-core-go/core"
-	esindexercore "github.com/multiversx/mx-chain-es-indexer-go/core"
 	"github.com/multiversx/mx-chain-es-indexer-go/data"
 	indexer "github.com/multiversx/mx-chain-es-indexer-go/process/dataindexer"
 )
@@ -168,9 +167,12 @@ func (dp *delegatorsProc) getDelegatorFromClaimRewardsEvent(args *argsProcessEve
 }
 
 func bytesToBool(boolBytes []byte) bool {
+	if len(boolBytes) > 5 {
+		return false
+	}
 	b, err := strconv.ParseBool(string(boolBytes))
 	if err != nil {
-		log.Warn("delegatorsProc.bytesToBool", "error", esindexercore.SanitizeLogError(err))
+		log.Warn("delegatorsProc.bytesToBool", "error", err.Error())
 	}
 
 	return b

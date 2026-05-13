@@ -13,7 +13,6 @@ import (
 	"github.com/multiversx/mx-chain-core-go/core/closing"
 	"github.com/multiversx/mx-chain-core-go/data/outport"
 	"github.com/multiversx/mx-chain-es-indexer-go/config"
-	esindexercore "github.com/multiversx/mx-chain-es-indexer-go/core"
 	"github.com/multiversx/mx-chain-es-indexer-go/factory"
 	"github.com/multiversx/mx-chain-es-indexer-go/metrics"
 	"github.com/multiversx/mx-chain-es-indexer-go/process/wsindexer"
@@ -80,7 +79,7 @@ func main() {
 
 	err := app.Run(os.Args)
 	if err != nil {
-		log.Error(esindexercore.SanitizeLogError(err))
+		log.Error(err.Error())
 		os.Exit(1)
 	}
 }

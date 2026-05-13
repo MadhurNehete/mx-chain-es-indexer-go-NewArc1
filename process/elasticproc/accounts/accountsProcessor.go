@@ -6,7 +6,6 @@ import (
 	"github.com/multiversx/mx-chain-core-go/core"
 	"github.com/multiversx/mx-chain-core-go/core/check"
 	"github.com/multiversx/mx-chain-core-go/data/alteredAccount"
-	esindexercore "github.com/multiversx/mx-chain-es-indexer-go/core"
 	"github.com/multiversx/mx-chain-es-indexer-go/data"
 	"github.com/multiversx/mx-chain-es-indexer-go/process/dataindexer"
 	"github.com/multiversx/mx-chain-es-indexer-go/process/elasticproc/converters"
@@ -199,7 +198,7 @@ func (ap *accountsProcessor) PrepareAccountsMapESDT(
 		if err != nil {
 			log.Warn("accountsProcessor.PrepareAccountsMapESDT: cannot get esdt info from account",
 				"address", address,
-				"error", esindexercore.SanitizeLogError(err))
+				"error", err.Error())
 			continue
 		}
 
@@ -315,7 +314,7 @@ func (ap *accountsProcessor) PutTokenMedataDataInTokens(tokensData []*data.Token
 		if errLoad != nil {
 			log.Warn("accountsProcessor.PutTokenMedataDataInTokens: cannot load token metadata",
 				"token identifier ", tokenData.Identifier,
-				"error", esindexercore.SanitizeLogError(errLoad))
+				"error", errLoad.Error())
 
 			continue
 		}

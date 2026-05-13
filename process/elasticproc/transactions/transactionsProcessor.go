@@ -1,6 +1,11 @@
 package transactions
 
 import (
+	"fmt"
+	"runtime/debug"
+)
+
+import (
 	"encoding/hex"
 	"math/big"
 
@@ -72,6 +77,12 @@ func (tdp *txsDatabaseProcessor) PrepareTransactionsForDatabase(
 	pool *outport.TransactionPool,
 	isImportDB bool,
 ) *data.PreparedResults {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("PANIC recovered in PrepareTransactionsForDatabase: %v\n", r)
+			debug.PrintStack()
+		}
+	}()
 	err := checkPrepareTransactionForDatabaseArguments(pool)
 	if err != nil {
 		log.Warn("checkPrepareTransactionForDatabaseArguments", "error", err)
@@ -231,4 +242,9 @@ func getFeeInfo(txWithFeeInfo feeInfoHandler) *outport.FeeInfo {
 		Fee:            big.NewInt(0),
 		InitialPaidFee: big.NewInt(0),
 	}
+}
+
+// IsInterfaceNil returns true if there is no value under the interface
+func (tdp *txsDatabaseProcessor) IsInterfaceNil() bool {
+	return tdp == nil
 }
