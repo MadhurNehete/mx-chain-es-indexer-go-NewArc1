@@ -1,0 +1,742 @@
+package block
+
+import (
+	"encoding/hex"
+	"errors"
+	"math/big"
+	"testing"
+
+	"github.com/multiversx/mx-chain-core-go/data/api"
+
+	"github.com/multiversx/mx-chain-core-go/core"
+	dataBlock "github.com/multiversx/mx-chain-core-go/data/block"
+	"github.com/multiversx/mx-chain-core-go/data/outport"
+	"github.com/multiversx/mx-chain-core-go/data/rewardTx"
+	"github.com/multiversx/mx-chain-core-go/data/smartContractResult"
+	"github.com/multiversx/mx-chain-core-go/data/transaction"
+	"github.com/multiversx/mx-chain-core-go/hashing"
+	"github.com/multiversx/mx-chain-core-go/marshal"
+	"github.com/multiversx/mx-chain-es-indexer-go/data"
+	"github.com/multiversx/mx-chain-es-indexer-go/mock"
+	indexer "github.com/multiversx/mx-chain-es-indexer-go/process/dataindexer"
+	"github.com/stretchr/testify/require"
+)
+
+func TestNewBlockProcessor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		argsFunc func() (hashing.Hasher, marshal.Marshalizer, core.PubkeyConverter)
+		exErr    error
+	}{
+		{
+			name: "NilMarshalizer",
+			argsFunc: func() (hashing.Hasher, marshal.Marshalizer, core.PubkeyConverter) {
+				return &mock.HasherMock{}, nil, nil
+			},
+			exErr: indexer.ErrNilMarshalizer,
+		},
+		{
+			name: "NilHasher",
+			argsFunc: func() (hashing.Hasher, marshal.Marshalizer, core.PubkeyConverter) {
+				return nil, &mock.MarshalizerMock{}, nil
+			},
+			exErr: indexer.ErrNilHasher,
+		},
+		{
+			name: "NilValidatorPubKeyConverter",
+			argsFunc: func() (hashing.Hasher, marshal.Marshalizer, core.PubkeyConverter) {
+				return &mock.HasherMock{}, &mock.MarshalizerMock{}, nil
+			},
+			exErr: indexer.ErrNilPubkeyConverter,
+		},
+		{
+			name: "ShouldWork",
+			argsFunc: func() (hashing.Hasher, marshal.Marshalizer, core.PubkeyConverter) {
+				return &mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{}
+			},
+			exErr: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		_, err := NewBlockProcessor(tt.argsFunc())
+		require.Equal(t, tt.exErr, err)
+	}
+}
+
+func TestBlockProcessor_PrepareBlockForDBShouldWork(t *testing.T) {
+	t.Parallel()
+
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{})
+
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{
+		Header: &dataBlock.Header{
+			RandSeed:        []byte("randSeed"),
+			PrevRandSeed:    []byte("prevRandSeed"),
+			Signature:       []byte("signature"),
+			LeaderSignature: []byte("leaderSignature"),
+			ChainID:         []byte("1"),
+			SoftwareVersion: []byte("1"),
+			ReceiptsHash:    []byte("hash"),
+			Reserved:        []byte("reserved"),
+		},
+		OutportBlock: &outport.OutportBlock{
+			BlockData: &outport.BlockData{
+				HeaderHash: []byte("hash"),
+				Body: &dataBlock.Body{
+					MiniBlocks: dataBlock.MiniBlockSlice{
+						{
+							ReceiverShardID: 1,
+						},
+						{
+							ReceiverShardID: 2,
+						},
+					},
+				},
+			},
+			SignersIndexes:       []uint64{0, 1, 2},
+			TransactionPool:      &outport.TransactionPool{},
+			HeaderGasConsumption: &outport.HeaderGasConsumption{},
+		},
+	}
+	blockResults, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.Nil(t, err)
+
+	blockResults.Block.UUID = ""
+
+	expectedBlock := &data.Block{
+		Hash:                  "68617368",
+		Validators:            []uint64{0x0, 0x1, 0x2},
+		EpochStartBlock:       false,
+		SearchOrder:           0x3fc,
+		MiniBlocksHashes:      []string{"0796d34e8d443fd31bf4d9ec4051421b4d5d0e8c1db9ff942d6f4dc3a9ca2803", "4cc379ab1f0aef6602e85a0a7ffabb5bc9a2ba646dc0fd720028e06527bf873f"},
+		NotarizedBlocksHashes: []string(nil),
+		Size:                  114,
+		AccumulatedFees:       "0",
+		DeveloperFees:         "0",
+		RandSeed:              "72616e6453656564",
+		PrevRandSeed:          "7072657652616e6453656564",
+		Signature:             "7369676e6174757265",
+		LeaderSignature:       "6c65616465725369676e6174757265",
+		ChainID:               "1",
+		SoftwareVersion:       "31",
+		ReceiptsHash:          "68617368",
+		Reserved:              []byte("reserved"),
+		MiniBlocksDetails:     []*data.MiniBlocksDetails{},
+	}
+	require.Equal(t, expectedBlock, blockResults.Block)
+}
+
+func TestBlockProcessor_PrepareBlockForDBNilHeader(t *testing.T) {
+	t.Parallel()
+
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{})
+
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{}
+	dbBlock, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.Equal(t, indexer.ErrNilHeaderHandler, err)
+	require.Nil(t, dbBlock)
+}
+
+func TestBlockProcessor_PrepareBlockForDBNilBody(t *testing.T) {
+	t.Parallel()
+
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{})
+
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{
+		Header: &dataBlock.MetaBlock{},
+		OutportBlock: &outport.OutportBlock{
+			BlockData: &outport.BlockData{},
+		},
+	}
+	dbBlock, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.Equal(t, indexer.ErrNilBlockBody, err)
+	require.Nil(t, dbBlock)
+}
+
+func TestBlockProcessor_PrepareBlockForDBMarshalFailHeader(t *testing.T) {
+	t.Parallel()
+
+	expectedErr := errors.New("local error")
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{
+		MarshalCalled: func(obj interface{}) ([]byte, error) {
+			return nil, expectedErr
+		},
+	}, &mock.PubkeyConverterMock{})
+
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{
+		Header: &dataBlock.Header{},
+		OutportBlock: &outport.OutportBlock{
+			BlockData: &outport.BlockData{
+				HeaderHash: []byte("hash"),
+				Body:       &dataBlock.Body{},
+			},
+			SignersIndexes:       []uint64{0, 1, 2},
+			TransactionPool:      &outport.TransactionPool{},
+			HeaderGasConsumption: &outport.HeaderGasConsumption{},
+		},
+	}
+	dbBlock, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.Equal(t, expectedErr, err)
+	require.Nil(t, dbBlock)
+}
+
+func TestBlockProcessor_PrepareBlockForDBMarshalFailBlock(t *testing.T) {
+	t.Parallel()
+
+	expectedErr := errors.New("local error")
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{
+		MarshalCalled: func(obj interface{}) ([]byte, error) {
+			return nil, expectedErr
+		},
+	}, &mock.PubkeyConverterMock{})
+
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{
+		Header: &dataBlock.Header{},
+		OutportBlock: &outport.OutportBlock{
+			BlockData: &outport.BlockData{
+				HeaderHash: []byte("hash"),
+				Body:       &dataBlock.Body{},
+			},
+			SignersIndexes:       []uint64{0, 1, 2},
+			TransactionPool:      &outport.TransactionPool{},
+			HeaderGasConsumption: &outport.HeaderGasConsumption{},
+		},
+	}
+	dbBlock, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.Equal(t, expectedErr, err)
+	require.Nil(t, dbBlock)
+}
+
+func TestBlockProcessor_ComputeHeaderHash(t *testing.T) {
+	t.Parallel()
+
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{})
+
+	header := &dataBlock.Header{}
+	hashBytes, err := bp.ComputeHeaderHash(header)
+	require.Nil(t, err)
+	require.Equal(t, "96f7d09988eafbc99b45dfce0eaf9df1d02def2ae678d88bd154ebffa3247b2a", hex.EncodeToString(hashBytes))
+}
+
+func TestBlockProcessor_PrepareBlockForDBEpochStartMeta(t *testing.T) {
+	t.Parallel()
+
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{})
+
+	header := &dataBlock.MetaBlock{
+		TxCount: 1000,
+		EpochStart: dataBlock.EpochStart{
+			LastFinalizedHeaders: []dataBlock.EpochStartShardData{{
+				ShardID:               1,
+				Nonce:                 1234,
+				Round:                 1500,
+				Epoch:                 10,
+				HeaderHash:            []byte("hh"),
+				RootHash:              []byte("rh"),
+				ScheduledRootHash:     []byte("sch"),
+				FirstPendingMetaBlock: []byte("fpmb"),
+				LastFinishedMetaBlock: []byte("lfmb"),
+				PendingMiniBlockHeaders: []dataBlock.MiniBlockHeader{
+					{
+						Hash:            []byte("mbh"),
+						SenderShardID:   0,
+						ReceiverShardID: 1,
+						Type:            dataBlock.TxBlock,
+						Reserved:        []byte("rrr"),
+					},
+				},
+			}},
+			Economics: dataBlock.Economics{
+				TotalSupply:                      big.NewInt(100),
+				TotalToDistribute:                big.NewInt(55),
+				TotalNewlyMinted:                 big.NewInt(20),
+				RewardsPerBlock:                  big.NewInt(15),
+				RewardsForProtocolSustainability: big.NewInt(2),
+				NodePrice:                        big.NewInt(10),
+				PrevEpochStartRound:              222,
+				PrevEpochStartHash:               []byte("prevEpoch"),
+			},
+		},
+		MiniBlockHeaders: []dataBlock.MiniBlockHeader{
+			{
+				TxCount: 50,
+			},
+			{
+				TxCount: 120,
+			},
+		},
+		TimeStamp: 123,
+	}
+
+	headerBytes, _ := bp.marshalizer.Marshal(header)
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{
+		Header: header,
+		OutportBlock: &outport.OutportBlock{
+			BlockData: &outport.BlockData{
+				TimestampMs: 123000,
+				HeaderProof: &dataBlock.HeaderProof{
+					PubKeysBitmap:       []byte("bitmap1"),
+					AggregatedSignature: []byte("sig1"),
+					HeaderHash:          []byte("hash1"),
+					HeaderEpoch:         2,
+					HeaderNonce:         2,
+					HeaderShardId:       2,
+					HeaderRound:         2,
+					IsStartOfEpoch:      false,
+				},
+				HeaderBytes: headerBytes,
+				HeaderHash:  []byte("hash"),
+				Body: &dataBlock.Body{
+					MiniBlocks: []*dataBlock.MiniBlock{
+						{
+							Reserved: []byte("rrr"),
+						},
+						{
+							Reserved: []byte("bbb"),
+						},
+					},
+				},
+			},
+			TransactionPool:      &outport.TransactionPool{},
+			HeaderGasConsumption: &outport.HeaderGasConsumption{},
+		},
+	}
+
+	blockResults, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.Nil(t, err)
+	blockResults.Block.UUID = ""
+
+	require.Equal(t, nil, err)
+	require.Equal(t, &data.Block{
+		Nonce:                 0,
+		Round:                 0,
+		Epoch:                 0,
+		Hash:                  "68617368",
+		MiniBlocksHashes:      []string{"89a593868f8904c0271805b55cc3259cefcf45284c0e1b0bf02781758ed88909", "1b90cc55d9b861b903fd793616b85aa8418f7e313746d7184a73950ab32bf3da"},
+		NotarizedBlocksHashes: nil,
+		Proposer:              0,
+		Validators:            nil,
+		PubKeyBitmap:          "6269746d617031",
+		Size:                  950,
+		SizeTxs:               0,
+		Timestamp:             123,
+		TimestampMs:           123000,
+		StateRootHash:         "",
+		PrevHash:              "",
+		ShardID:               core.MetachainShardId,
+		EpochStartBlock:       true,
+		SearchOrder:           0x3f2,
+		EpochStartInfo: &data.EpochStartInfo{
+			TotalSupply:                      "100",
+			TotalToDistribute:                "55",
+			TotalNewlyMinted:                 "20",
+			RewardsPerBlock:                  "15",
+			RewardsForProtocolSustainability: "2",
+			NodePrice:                        "10",
+			PrevEpochStartRound:              222,
+			PrevEpochStartHash:               "7072657645706f6368",
+		},
+		MiniBlocksDetails: []*data.MiniBlocksDetails{
+			{
+				IndexFirstProcessedTx:    0,
+				IndexLastProcessedTx:     49,
+				MBIndex:                  0,
+				Type:                     dataBlock.TxBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				ExecutionOrderTxsIndices: []int{},
+				TxsHashes:                []string{},
+			},
+			{
+				IndexFirstProcessedTx:    0,
+				IndexLastProcessedTx:     119,
+				MBIndex:                  1,
+				Type:                     dataBlock.TxBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				ExecutionOrderTxsIndices: []int{},
+				TxsHashes:                []string{},
+			},
+		},
+		Proof: &api.HeaderProof{
+			PubKeysBitmap:       "6269746d617031",
+			AggregatedSignature: "73696731",
+			HeaderHash:          "6861736831",
+			HeaderEpoch:         2,
+			HeaderNonce:         2,
+			HeaderShardId:       2,
+			HeaderRound:         2,
+			IsStartOfEpoch:      false,
+		},
+		EpochStartShardsData: []*data.EpochStartShardData{
+			{
+				ShardID:               1,
+				Epoch:                 10,
+				Round:                 1500,
+				Nonce:                 1234,
+				HeaderHash:            "6868",
+				RootHash:              "7268",
+				ScheduledRootHash:     "736368",
+				FirstPendingMetaBlock: "66706d62",
+				LastFinishedMetaBlock: "6c666d62",
+				PendingMiniBlockHeaders: []*data.Miniblock{
+					{
+						Hash:            "6d6268",
+						SenderShardID:   0,
+						ReceiverShardID: 1,
+						Type:            "TxBlock",
+						Reserved:        []byte("rrr"),
+					},
+				},
+			},
+		},
+		NotarizedTxsCount: 830,
+		TxCount:           170,
+		AccumulatedFees:   "0",
+		DeveloperFees:     "0",
+	}, blockResults.Block)
+}
+
+func TestBlockProcessor_PrepareBlockForDBMiniBlocksDetails(t *testing.T) {
+	t.Parallel()
+
+	gogoMarshaller := &marshal.GogoProtoMarshalizer{}
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{})
+
+	mbhr := &dataBlock.MiniBlockHeaderReserved{
+		IndexOfFirstTxProcessed: 0,
+		IndexOfLastTxProcessed:  1,
+	}
+	mbhrBytes, _ := gogoMarshaller.Marshal(mbhr)
+
+	txHash, notExecutedTxHash, notFoundTxHash, invalidTxHash, rewardsTxHash, scrHash, intraSCR := "tx", "notExecuted", "notFound", "invalid", "reward", "scr", "intraSCR"
+
+	header := &dataBlock.Header{
+		TxCount: 5,
+		MiniBlockHeaders: []dataBlock.MiniBlockHeader{
+			{
+				TxCount:  1,
+				Type:     dataBlock.TxBlock,
+				Reserved: mbhrBytes,
+			},
+			{
+				TxCount: 1,
+				Type:    dataBlock.RewardsBlock,
+			},
+			{
+				TxCount: 1,
+				Type:    dataBlock.InvalidBlock,
+			},
+			{
+				TxCount: 1,
+				Type:    dataBlock.SmartContractResultBlock,
+			},
+		},
+	}
+	headerBytes, _ := bp.marshalizer.Marshal(header)
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{
+		Header: header,
+		OutportBlock: &outport.OutportBlock{
+			BlockData: &outport.BlockData{
+				IntraShardMiniBlocks: []*dataBlock.MiniBlock{
+					{
+						Type:     dataBlock.SmartContractResultBlock,
+						TxHashes: [][]byte{[]byte(intraSCR)},
+					},
+				},
+				HeaderBytes: headerBytes,
+				HeaderHash:  []byte("hash"),
+				Body: &dataBlock.Body{
+					MiniBlocks: []*dataBlock.MiniBlock{
+						{
+							Type:     dataBlock.TxBlock,
+							TxHashes: [][]byte{[]byte(txHash), []byte(notFoundTxHash), []byte(notExecutedTxHash)},
+						},
+						{
+							Type:     dataBlock.RewardsBlock,
+							TxHashes: [][]byte{[]byte(rewardsTxHash)},
+						},
+						{
+							Type:     dataBlock.InvalidBlock,
+							TxHashes: [][]byte{[]byte(invalidTxHash)},
+						},
+						{
+							Type:     dataBlock.SmartContractResultBlock,
+							TxHashes: [][]byte{[]byte(scrHash)},
+						},
+					},
+				},
+			},
+			TransactionPool: &outport.TransactionPool{
+				Transactions: map[string]*outport.TxInfo{
+					hex.EncodeToString([]byte(txHash)): {
+						Transaction:    &transaction.Transaction{},
+						ExecutionOrder: 2,
+					},
+					hex.EncodeToString([]byte(notExecutedTxHash)): {
+						ExecutionOrder: 0,
+					},
+				},
+				Rewards: map[string]*outport.RewardInfo{
+					hex.EncodeToString([]byte(rewardsTxHash)): {
+						Reward:         &rewardTx.RewardTx{},
+						ExecutionOrder: 3,
+					},
+				},
+				InvalidTxs: map[string]*outport.TxInfo{
+					hex.EncodeToString([]byte(invalidTxHash)): {
+						Transaction:    &transaction.Transaction{},
+						ExecutionOrder: 1,
+					}},
+				SmartContractResults: map[string]*outport.SCRInfo{
+					hex.EncodeToString([]byte(scrHash)): {
+						SmartContractResult: &smartContractResult.SmartContractResult{},
+						ExecutionOrder:      0,
+					},
+					hex.EncodeToString([]byte(intraSCR)): {
+						SmartContractResult: &smartContractResult.SmartContractResult{},
+						ExecutionOrder:      4,
+					},
+				},
+			},
+			HeaderGasConsumption: &outport.HeaderGasConsumption{},
+		},
+	}
+
+	blockResults, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.Nil(t, err)
+	require.Equal(t, 0, len(blockResults.ExecutionResults))
+	blockResults.Block.UUID = ""
+
+	require.Equal(t, &data.Block{
+		Hash:            "68617368",
+		Size:            int64(723),
+		SizeTxs:         21,
+		AccumulatedFees: "0",
+		DeveloperFees:   "0",
+		TxCount:         uint32(5),
+		SearchOrder:     uint64(1020),
+		MiniBlocksHashes: []string{
+			"8987edec270eb942d8ea9051fe301673aea29890919f5849882617aabcc7a248",
+			"1183f422a5b76c3cb7b439334f1fe7235c8d09f577e0f1e15e62cd05b9a81950",
+			"b24e307f3917e84603d3ebfb9c03c8fc651b62cb68ca884c3ff015b66a610a79",
+			"c0a855563172b2f72be569963d26d4fae38d4371342e2bf3ded93466a72f36f3",
+			"381b0f52b35781ddce70dc7ee08907a29f49ed9c46ea0b7b59e5833ba3213d10",
+		},
+		MiniBlocksDetails: []*data.MiniBlocksDetails{
+			{
+				IndexFirstProcessedTx:    0,
+				IndexLastProcessedTx:     1,
+				MBIndex:                  0,
+				Type:                     dataBlock.TxBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				ExecutionOrderTxsIndices: []int{2, notFound, notExecutedInCurrentBlock},
+				TxsHashes:                []string{"7478", "6e6f74466f756e64", "6e6f744578656375746564"},
+			},
+			{
+				IndexFirstProcessedTx:    0,
+				IndexLastProcessedTx:     0,
+				MBIndex:                  1,
+				Type:                     dataBlock.RewardsBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				ExecutionOrderTxsIndices: []int{3},
+				TxsHashes:                []string{"726577617264"},
+			},
+			{IndexFirstProcessedTx: 0,
+				IndexLastProcessedTx:     0,
+				MBIndex:                  2,
+				Type:                     dataBlock.InvalidBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				ExecutionOrderTxsIndices: []int{1},
+				TxsHashes:                []string{"696e76616c6964"}},
+			{IndexFirstProcessedTx: 0,
+				IndexLastProcessedTx:     0,
+				MBIndex:                  3,
+				Type:                     dataBlock.SmartContractResultBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				ExecutionOrderTxsIndices: []int{0},
+				TxsHashes:                []string{"736372"}},
+			{IndexFirstProcessedTx: 0,
+				IndexLastProcessedTx:     0,
+				MBIndex:                  4,
+				Type:                     dataBlock.SmartContractResultBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				ExecutionOrderTxsIndices: []int{4},
+				TxsHashes:                []string{"696e747261534352"}},
+		},
+	}, blockResults.Block)
+}
+
+func TestPrepareExecutionResult(t *testing.T) {
+	t.Parallel()
+
+	bp, _ := NewBlockProcessor(&mock.HasherMock{}, &mock.MarshalizerMock{}, &mock.PubkeyConverterMock{})
+
+	executionResultHeaderHash := []byte("h1")
+	mb1Hash := []byte("mb1")
+	txHash := []byte("tx1")
+
+	outportBlockWithHeader := &outport.OutportBlockWithHeader{
+		Header: &dataBlock.HeaderV3{
+			ExecutionResults: []*dataBlock.ExecutionResult{
+				{
+					BaseExecutionResult: &dataBlock.BaseExecutionResult{
+						HeaderHash:  executionResultHeaderHash,
+						HeaderNonce: 1,
+						HeaderRound: 2,
+						HeaderEpoch: 3,
+					},
+					MiniBlockHeaders: []dataBlock.MiniBlockHeader{
+						{
+							Hash:            mb1Hash,
+							SenderShardID:   0,
+							ReceiverShardID: 0,
+							Type:            dataBlock.TxBlock,
+							TxCount:         1,
+						},
+					},
+					AccumulatedFees: big.NewInt(1),
+					DeveloperFees:   big.NewInt(2),
+				},
+			},
+		},
+		OutportBlock: &outport.OutportBlock{
+			ShardID:              2,
+			HeaderGasConsumption: &outport.HeaderGasConsumption{},
+			BlockData: &outport.BlockData{
+				Body: &dataBlock.Body{},
+				Results: map[string]*outport.ExecutionResultData{
+					hex.EncodeToString(executionResultHeaderHash): {
+						HeaderGasConsumption: &outport.HeaderGasConsumption{
+							GasProvided:    200,
+							GasRefunded:    100,
+							GasPenalized:   100,
+							MaxGasPerBlock: 500_000,
+						},
+						TimestampMs: 1234567890,
+						Body: &dataBlock.Body{
+							MiniBlocks: []*dataBlock.MiniBlock{
+								{
+									SenderShardID:   0,
+									ReceiverShardID: 0,
+									Type:            dataBlock.TxBlock,
+									TxHashes:        [][]byte{txHash},
+								},
+							},
+						},
+						TransactionPool: &outport.TransactionPool{
+							Transactions: map[string]*outport.TxInfo{
+								hex.EncodeToString(txHash): {
+									Transaction:    &transaction.Transaction{},
+									ExecutionOrder: 2,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	results, err := bp.PrepareBlockForDB(outportBlockWithHeader)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"6831"}, results.Block.ExecutionResultBlockHashes)
+	results.ExecutionResults[0].UUID = ""
+	require.Equal(t, &data.ExecutionResult{
+		Hash:                 "6831",
+		RootHash:             "",
+		NotarizedInBlockHash: "",
+		AccumulatedFees:      "1",
+		DeveloperFees:        "2",
+		TxCount:              0,
+		GasUsed:              0,
+		Nonce:                1,
+		Round:                2,
+		TimestampMs:          1234567890,
+		Epoch:                3,
+		ShardID:              2,
+		GasProvided:          200,
+		GasRefunded:          100,
+		GasPenalized:         100,
+		MaxGasLimit:          500_000,
+		MiniBlocksHashes:     []string{"2dae16da63bc04a18cf7609e0a79d7867b11463660dbab048b044b8434bf0a82"},
+		MiniBlocksDetails: []*data.MiniBlocksDetails{
+			{
+				IndexLastProcessedTx:     0,
+				IndexFirstProcessedTx:    0,
+				Type:                     dataBlock.TxBlock.String(),
+				ProcessingType:           dataBlock.Normal.String(),
+				TxsHashes:                []string{hex.EncodeToString(txHash)},
+				ExecutionOrderTxsIndices: []int{2},
+			},
+		},
+	}, results.ExecutionResults[0])
+}
+
+func TestAddInBlockLastExecutionResultData(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil last execution result", func(t *testing.T) {
+		elasticBlock := &data.Block{}
+		obh := &outport.OutportBlockWithHeader{
+			Header: &dataBlock.Header{},
+		}
+
+		addInBlockLastExecutionResultData(elasticBlock, obh)
+
+		require.Equal(t, "", elasticBlock.LastExecutionResultHash)
+		require.Equal(t, uint64(0), elasticBlock.LastExecutionResultNonce)
+	})
+
+	t.Run("with ExecutionResultInfo", func(t *testing.T) {
+		elasticBlock := &data.Block{}
+		headerHash := []byte("headerHash")
+		nonce := uint64(10)
+
+		execResultInfo := &dataBlock.ExecutionResultInfo{
+			ExecutionResult: &dataBlock.BaseExecutionResult{
+				HeaderHash:  headerHash,
+				HeaderNonce: nonce,
+			},
+		}
+
+		obh := &outport.OutportBlockWithHeader{
+			Header: &dataBlock.HeaderV3{
+				LastExecutionResult: execResultInfo,
+			},
+		}
+
+		addInBlockLastExecutionResultData(elasticBlock, obh)
+
+		require.Equal(t, hex.EncodeToString(headerHash), elasticBlock.LastExecutionResultHash)
+		require.Equal(t, nonce, elasticBlock.LastExecutionResultNonce)
+	})
+
+	t.Run("with MetaExecutionResultInfo", func(t *testing.T) {
+		elasticBlock := &data.Block{}
+		headerHash := []byte("headerHashMeta")
+		nonce := uint64(20)
+
+		execResultInfo := &dataBlock.MetaExecutionResultInfo{
+			ExecutionResult: &dataBlock.BaseMetaExecutionResult{
+				BaseExecutionResult: &dataBlock.BaseExecutionResult{
+					HeaderHash:  headerHash,
+					HeaderNonce: nonce,
+				},
+			},
+		}
+
+		obh := &outport.OutportBlockWithHeader{
+			Header: &dataBlock.MetaBlockV3{
+				LastExecutionResult: execResultInfo,
+			},
+		}
+
+		addInBlockLastExecutionResultData(elasticBlock, obh)
+
+		require.Equal(t, hex.EncodeToString(headerHash), elasticBlock.LastExecutionResultHash)
+		require.Equal(t, nonce, elasticBlock.LastExecutionResultNonce)
+	})
+}
