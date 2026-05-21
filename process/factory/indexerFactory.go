@@ -49,6 +49,8 @@ type ArgsIndexerFactory struct {
 	EnableEpochsConfig       config.EnableEpochsConfig
 	UseTemplatesFromFiles    bool
 	ConfigPath               string
+	DRWAAuthorizedEmitters   []string
+	MRVAuthorizedEmitters    []string
 }
 
 // NewIndexer will create a new instance of Indexer
@@ -106,6 +108,8 @@ func createElasticProcessor(args ArgsIndexerFactory) (dataindexer.ElasticProcess
 		ConfigPath:               args.ConfigPath,
 		IndicesWithPolicy:        args.IndicesWithPolicy,
 		NumWritesInParallel:      args.NumWritesInParallel,
+		DRWAAuthorizedEmitters:   args.DRWAAuthorizedEmitters,
+		MRVAuthorizedEmitters:    args.MRVAuthorizedEmitters,
 	}
 
 	return factory.CreateElasticProcessor(argsElasticProcFac)

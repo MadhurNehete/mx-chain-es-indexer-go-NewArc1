@@ -12,6 +12,7 @@ type DatabaseWriterStub struct {
 	DoMultiGetCalled          func(ids []string, index string, withSource bool, response interface{}) error
 	CheckAndCreateIndexCalled func(index string) error
 	DoScrollRequestCalled     func(index string, body []byte, withSource bool, handlerFunc func(responseBytes []byte) error) error
+	UpdateByQueryCalled       func(index string, body *bytes.Buffer) error
 }
 
 // PutMappings -
@@ -20,7 +21,11 @@ func (dwm *DatabaseWriterStub) PutMappings(_ string, _ *bytes.Buffer) error {
 }
 
 // UpdateByQuery -
-func (dwm *DatabaseWriterStub) UpdateByQuery(_ context.Context, _ string, _ *bytes.Buffer) error {
+func (dwm *DatabaseWriterStub) UpdateByQuery(_ context.Context, index string, body *bytes.Buffer) error {
+	if dwm.UpdateByQueryCalled != nil {
+		return dwm.UpdateByQueryCalled(index, body)
+	}
+
 	return nil
 }
 

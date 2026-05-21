@@ -10,6 +10,14 @@
         indices-with-policy = ["rating", "transactions", "blocks", "validators", "miniblocks", "rounds", "accounts",
             "accountshistory", "receipts", "scresults", "accountsesdt", "accountsesdthistory", "epochinfo",
             "scdeploys", "tokens", "tags", "logs", "delegators", "operations", "esdts", "events", "executionresults"]
+    [config.drwa]
+        # Authorized smart-contract emitters for DRWA-specific event materialization.
+        # Empty means DRWA event extraction fails closed.
+        authorized-emitters = []
+    [config.mrv]
+        # Authorized smart-contract emitters for MRV-specific event materialization.
+        # Empty means MRV event extraction fails closed.
+        authorized-emitters = []
     [config.address-converter]
         length = 32
         type = "bech32"

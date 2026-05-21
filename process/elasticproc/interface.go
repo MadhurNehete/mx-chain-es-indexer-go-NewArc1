@@ -119,14 +119,14 @@ type DBLogsAndEventsHandler interface {
 		buffSlice *data.BufferSlice,
 		index string,
 	) error
-	PrepareDelegatorsQueryInCaseOfRevert(timestampMs uint64) *bytes.Buffer
-	FinalizeDRWARecords(shardID uint32, headerHash []byte) error
 	SerializeDRWADenials(records []*data.DrwaDenialRecord, buffSlice *data.BufferSlice, index string) error
 	SerializeDRWAIdentities(records []*data.DrwaIdentityRecord, buffSlice *data.BufferSlice, index string) error
 	SerializeDRWAHolderCompliance(records []*data.DrwaHolderComplianceRecord, buffSlice *data.BufferSlice, index string) error
 	SerializeDRWAAttestations(records []*data.DrwaAttestationRecord, buffSlice *data.BufferSlice, index string) error
 	SerializeDRWATokenPolicies(records []*data.DrwaTokenPolicyRecord, buffSlice *data.BufferSlice, index string) error
 	SerializeDRWAControlEvents(records []*data.DrwaControlEventRecord, buffSlice *data.BufferSlice, index string) error
+	SerializeMRVAnchoredProofs(records []*data.MrvAnchoredProofRecord, buffSlice *data.BufferSlice, index string) error
+	PrepareDelegatorsQueryInCaseOfRevert(timestampMs uint64) *bytes.Buffer
 	IsInterfaceNil() bool
 }
 

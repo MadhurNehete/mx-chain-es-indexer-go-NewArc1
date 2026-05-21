@@ -19,7 +19,7 @@
 
     [config.elastic-cluster]
         url = "http://localhost:9200"
-        username = ""
-        password = ""
+        username = "elastic"
+        password = "myPassword"
         bulk-request-max-size-in-bytes = 4194304 # 4MB
         num-writes-in-parallel = 1

@@ -5,7 +5,13 @@ type Config struct {
 	Config struct {
 		AvailableIndices      []string `toml:"available-indices"`
 		UseTemplatesFromFiles bool     `toml:"use-templates-from-files"`
-		Policies              struct {
+		DRWA                  struct {
+			AuthorizedEmitters []string `toml:"authorized-emitters"`
+		} `toml:"drwa"`
+		MRV struct {
+			AuthorizedEmitters []string `toml:"authorized-emitters"`
+		} `toml:"mrv"`
+		Policies struct {
 			Enabled           bool     `toml:"enabled"`
 			IndicesWithPolicy []string `toml:"indices-with-policy"`
 		} `toml:"policies"`

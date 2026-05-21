@@ -108,6 +108,8 @@ func createDataIndexer(
 		NumWritesInParallel:      clusterCfg.Config.ElasticCluster.NumWritesInParallel,
 		UseTemplatesFromFiles:    cfg.Config.UseTemplatesFromFiles,
 		ConfigPath:               configPathStr,
+		DRWAAuthorizedEmitters:   cfg.Config.DRWA.AuthorizedEmitters,
+		MRVAuthorizedEmitters:    cfg.Config.MRV.AuthorizedEmitters,
 	})
 }
 

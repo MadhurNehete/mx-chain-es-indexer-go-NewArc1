@@ -45,4 +45,5 @@ type PreparedLogsResults struct {
 	DrwaAttestations        []*DrwaAttestationRecord
 	DrwaTokenPolicies       []*DrwaTokenPolicyRecord
 	DrwaControlEvents       []*DrwaControlEventRecord
+	MrvAnchoredProofs       []*MrvAnchoredProofRecord
 }

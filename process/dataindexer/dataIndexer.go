@@ -175,9 +175,9 @@ func (di *dataIndexer) SaveAccounts(accounts *outport.Accounts) error {
 	return di.elasticProcessor.SaveAccounts(accounts)
 }
 
-// FinalizedBlock returns nil
-func (di *dataIndexer) FinalizedBlock(_ *outport.FinalizedBlock) error {
-	return nil
+// FinalizedBlock forwards finalized block notifications to the elastic processor.
+func (di *dataIndexer) FinalizedBlock(finalizedBlock *outport.FinalizedBlock) error {
+	return di.elasticProcessor.FinalizedBlock(finalizedBlock)
 }
 
 // GetMarshaller return the marshaller

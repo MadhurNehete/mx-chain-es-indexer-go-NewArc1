@@ -17,7 +17,7 @@ start() {
 
   docker rm -f ${IMAGE_NAME} 2> /dev/null
   docker run -d --name "${IMAGE_NAME}" -p 9200:9200  -p 9300:9300 \
-   -e "discovery.type=single-node" -e "xpack.security.enabled=false" -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+   -e "discovery.type=single-node" -e "xpack.security.enabled=true" -e "ELASTIC_PASSWORD=myPassword" -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
     docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
   # Wait elastic cluster to start
   echo "Waiting Elasticsearch cluster to start..."
@@ -31,13 +31,13 @@ stop() {
 
 delete() {
    for str in ${INDICES_LIST[@]}; do
-      curl -XDELETE http://localhost:9200/$str-000001
-      curl -XDELETE http://localhost:9200/$str
-      curl -s -o /dev/null -w "%{http_code}" -X GET localhost:9200/_ilm/policy/$str-policy | grep -q 200 && curl -X DELETE localhost:9200/_ilm/policy/$str-policy
+      curl -u elastic:myPassword -XDELETE http://localhost:9200/$str-000001
+      curl -u elastic:myPassword -XDELETE http://localhost:9200/$str
+      curl -u elastic:myPassword -s -o /dev/null -w "%{http_code}" -X GET localhost:9200/_ilm/policy/$str-policy | grep -q 200 && curl -u elastic:myPassword -X DELETE localhost:9200/_ilm/policy/$str-policy
       echo
    done
 
-  curl -XDELETE http://localhost:9200/_template/*
+  curl -u elastic:myPassword -XDELETE http://localhost:9200/_template/*
   echo
 }
 

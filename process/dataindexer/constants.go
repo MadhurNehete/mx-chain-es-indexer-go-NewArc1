@@ -47,18 +47,20 @@ const (
 	ValuesIndex = "values"
 	// EventsIndex is the Elasticsearch index for log events
 	EventsIndex = "events"
+	// DrwaDenialsIndex is the Elasticsearch index for DRWA regulated transfer denial history
+	DrwaDenialsIndex = "drwa-denials"
+	// DrwaIdentitiesIndex is the Elasticsearch index for DRWA identity lifecycle history
+	DrwaIdentitiesIndex = "drwa-identities"
+	// DrwaHolderComplianceIndex is the Elasticsearch index for DRWA holder compliance update history
+	DrwaHolderComplianceIndex = "drwa-holder-compliance"
+	// DrwaAttestationsIndex is the Elasticsearch index for DRWA auditor attestation history
+	DrwaAttestationsIndex = "drwa-attestations"
+	// DrwaTokenPoliciesIndex is the Elasticsearch index for DRWA token policy history
+	DrwaTokenPoliciesIndex = "drwa-token-policies"
+	// DrwaControlEventsIndex is the Elasticsearch index for DRWA governance / control-plane events
+	DrwaControlEventsIndex = "drwa-control-events"
+	// MrvAnchoredProofsIndex is the Elasticsearch index for MRV anchored and amended proof events
+	MrvAnchoredProofsIndex = "mrv-anchored-proofs"
 	// ExecutionResultsIndex is the Elasticsearch index for execution results
 	ExecutionResultsIndex = "executionresults"
-	// DrwaDenialsIndex is the Elasticsearch index for DRWA denials
-	DrwaDenialsIndex = "drwa-denials"
-	// DrwaIdentitiesIndex is the Elasticsearch index for DRWA identities
-	DrwaIdentitiesIndex = "drwa-identities"
-	// DrwaHolderComplianceIndex is the Elasticsearch index for DRWA holder compliance
-	DrwaHolderComplianceIndex = "drwa-holder-compliance"
-	// DrwaAttestationsIndex is the Elasticsearch index for DRWA attestations
-	DrwaAttestationsIndex = "drwa-attestations"
-	// DrwaTokenPoliciesIndex is the Elasticsearch index for DRWA token policies
-	DrwaTokenPoliciesIndex = "drwa-token-policies"
-	// DrwaControlEventsIndex is the Elasticsearch index for DRWA control events
-	DrwaControlEventsIndex = "drwa-control-events"
 )

@@ -23,6 +23,9 @@ type ArgsLogsAndEventsProcessor struct {
 	Marshalizer      marshal.Marshalizer
 	BalanceConverter dataindexer.BalanceConverter
 	Hasher           hashing.Hasher
+	// Nil or empty emitter lists fail closed: DRWA/MRV events are ignored.
+	DRWAAuthorizedEmitters [][]byte
+	MRVAuthorizedEmitters  [][]byte
 }
 
 type logsAndEventsProcessor struct {
@@ -72,8 +75,9 @@ func createEventsProcessors(args ArgsLogsAndEventsProcessor) []eventsProcessor {
 	esdtPropProc := newEsdtPropertiesProcessor(args.PubKeyConverter)
 	esdtIssueProc := newESDTIssueProcessor(args.PubKeyConverter)
 	delegatorsProcessor := newDelegatorsProcessor(args.PubKeyConverter, args.BalanceConverter)
+	drwaProc := newDRWAEventsProcessorWithAuthorizedEmitters(args.DRWAAuthorizedEmitters)
+	mrvProc := newMRVEventsProcessorWithAuthorizedEmitters(args.MRVAuthorizedEmitters)
 
-	drwaProc := newDRWAEventsProcessorOpenMode()
 	eventsProcs := []eventsProcessor{
 		scDeploysProc,
 		informativeProc,
@@ -83,6 +87,7 @@ func createEventsProcessors(args ArgsLogsAndEventsProcessor) []eventsProcessor {
 		delegatorsProcessor,
 		nftsProc,
 		drwaProc,
+		mrvProc,
 	}
 
 	return eventsProcs
@@ -98,14 +103,14 @@ func (lep *logsAndEventsProcessor) ExtractDataFromLogs(
 	blockHash string,
 	blockRound uint64,
 ) *data.PreparedLogsResults {
-	lgData := newLogsData(preparedResults.Transactions, preparedResults.ScResults, timestampMs)
+	lgData := newLogsData(preparedResults.Transactions, preparedResults.ScResults, timestampMs, blockHash, blockRound)
 	for _, txLog := range logsAndEvents {
 		if txLog == nil {
 			continue
 		}
 
 		events := txLog.Log.Events
-		lep.processEvents(lgData, txLog.TxHash, txLog.Log.Address, events, shardID, numOfShards, blockHash, blockRound)
+		lep.processEvents(lgData, txLog.TxHash, txLog.Log.Address, events, shardID, numOfShards)
 
 		tx, ok := lgData.txsMap[txLog.TxHash]
 		if ok {
@@ -139,20 +144,21 @@ func (lep *logsAndEventsProcessor) ExtractDataFromLogs(
 		DrwaAttestations:        lgData.drwaAttestations,
 		DrwaTokenPolicies:       lgData.drwaTokenPolicies,
 		DrwaControlEvents:       lgData.drwaControlEvents,
+		MrvAnchoredProofs:       lgData.mrvAnchoredProofs,
 	}
 }
 
-func (lep *logsAndEventsProcessor) processEvents(lgData *logsData, logHashHexEncoded string, logAddress []byte, events []*transaction.Event, shardID uint32, numOfShards uint32, blockHash string, blockRound uint64) {
+func (lep *logsAndEventsProcessor) processEvents(lgData *logsData, logHashHexEncoded string, logAddress []byte, events []*transaction.Event, shardID uint32, numOfShards uint32) {
 	for idx, event := range events {
 		if check.IfNil(event) {
 			continue
 		}
 
-		lep.processEvent(lgData, logHashHexEncoded, logAddress, event, shardID, numOfShards, blockHash, blockRound, idx)
+		lep.processEvent(lgData, logHashHexEncoded, logAddress, event, idx, shardID, numOfShards)
 	}
 }
 
-func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEncoded string, logAddress []byte, event coreData.EventHandler, shardID uint32, numOfShards uint32, blockHash string, blockRound uint64, eventOrder int) {
+func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEncoded string, logAddress []byte, event coreData.EventHandler, eventOrder int, shardID uint32, numOfShards uint32) {
 	for _, proc := range lep.eventsProcessors {
 		res := proc.processEvent(&argsProcessEvent{
 			event:                   event,
@@ -162,6 +168,9 @@ func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEnco
 			tokensSupply:            lgData.tokensSupply,
 			timestamp:               lgData.timestamp,
 			timestampMs:             lgData.timestampMs,
+			blockHash:               lgData.blockHash,
+			blockRound:              lgData.blockRound,
+			eventOrder:              eventOrder,
 			scDeploys:               lgData.scDeploys,
 			txs:                     lgData.txsMap,
 			scrs:                    lgData.scrsMap,
@@ -170,38 +179,8 @@ func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEnco
 			changeOwnerOperations:   lgData.changeOwnerOperations,
 			selfShardID:             shardID,
 			numOfShards:             numOfShards,
-			blockHash:               blockHash,
-			blockRound:              blockRound,
-			eventOrder:              eventOrder,
 		})
-		if res.tokenInfo != nil {
-			lgData.tokensInfo = append(lgData.tokensInfo, res.tokenInfo)
-		}
-		if res.delegator != nil {
-			lgData.delegators[res.delegator.Address+res.delegator.Contract] = res.delegator
-		}
-		if res.updatePropNFT != nil {
-			lgData.nftsDataUpdates = append(lgData.nftsDataUpdates, res.updatePropNFT)
-		}
-
-		if res.drwaDenial != nil {
-			lgData.drwaDenials = append(lgData.drwaDenials, res.drwaDenial)
-		}
-		if res.drwaIdentity != nil {
-			lgData.drwaIdentities = append(lgData.drwaIdentities, res.drwaIdentity)
-		}
-		if res.drwaHolderCompliance != nil {
-			lgData.drwaHolderCompliances = append(lgData.drwaHolderCompliances, res.drwaHolderCompliance)
-		}
-		if res.drwaAttestation != nil {
-			lgData.drwaAttestations = append(lgData.drwaAttestations, res.drwaAttestation)
-		}
-		if res.drwaTokenPolicy != nil {
-			lgData.drwaTokenPolicies = append(lgData.drwaTokenPolicies, res.drwaTokenPolicy)
-		}
-		if res.drwaControlEvent != nil {
-			lgData.drwaControlEvents = append(lgData.drwaControlEvents, res.drwaControlEvent)
-		}
+		lep.collectEventResults(lgData, res)
 		tx, ok := lgData.txsMap[logHashHexEncoded]
 		if ok {
 			tx.HasOperations = true
@@ -216,6 +195,39 @@ func (lep *logsAndEventsProcessor) processEvent(lgData *logsData, logHashHexEnco
 		if res.processed {
 			return
 		}
+	}
+}
+
+func (lep *logsAndEventsProcessor) collectEventResults(lgData *logsData, res argOutputProcessEvent) {
+	if res.tokenInfo != nil {
+		lgData.tokensInfo = append(lgData.tokensInfo, res.tokenInfo)
+	}
+	if res.delegator != nil {
+		lgData.delegators[res.delegator.Address+res.delegator.Contract] = res.delegator
+	}
+	if res.updatePropNFT != nil {
+		lgData.nftsDataUpdates = append(lgData.nftsDataUpdates, res.updatePropNFT)
+	}
+	if res.drwaDenial != nil {
+		lgData.drwaDenials = append(lgData.drwaDenials, res.drwaDenial)
+	}
+	if res.drwaIdentity != nil {
+		lgData.drwaIdentities = append(lgData.drwaIdentities, res.drwaIdentity)
+	}
+	if res.drwaHolderCompliance != nil {
+		lgData.drwaHolderCompliances = append(lgData.drwaHolderCompliances, res.drwaHolderCompliance)
+	}
+	if res.drwaAttestation != nil {
+		lgData.drwaAttestations = append(lgData.drwaAttestations, res.drwaAttestation)
+	}
+	if res.drwaTokenPolicy != nil {
+		lgData.drwaTokenPolicies = append(lgData.drwaTokenPolicies, res.drwaTokenPolicy)
+	}
+	if res.drwaControlEvent != nil {
+		lgData.drwaControlEvents = append(lgData.drwaControlEvents, res.drwaControlEvent)
+	}
+	if res.mrvAnchoredProof != nil {
+		lgData.mrvAnchoredProofs = append(lgData.mrvAnchoredProofs, res.mrvAnchoredProof)
 	}
 }
 
@@ -331,13 +343,6 @@ func (lep *logsAndEventsProcessor) getExecutionOrder(lgData *logsData, logHashHe
 	log.Warn("cannot find hash in the txs map or scrs map", "hash", logHashHex)
 
 	return -1
-}
-
-// FinalizeDRWARecords will finalize all DRWA records for a given block hash
-func (lep *logsAndEventsProcessor) FinalizeDRWARecords(shardID uint32, headerHash []byte) error {
-	// Not implemented yet - this is a stub to satisfy the interface
-	// In a real implementation, this would use UpdateByQuery to set isFinalized: true
-	return nil
 }
 
 func hexEncodeSlice(input [][]byte) []string {

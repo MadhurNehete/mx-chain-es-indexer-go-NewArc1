@@ -36,8 +36,19 @@ func setLogLevelDebug() {
 
 // nolint
 func createESClient(url string) (elasticproc.DatabaseClientHandler, error) {
+	username := os.Getenv("ELASTIC_USERNAME")
+	if username == "" {
+		username = "elastic"
+	}
+	password := os.Getenv("ELASTIC_PASSWORD")
+	if password == "" {
+		password = "myPassword"
+	}
+
 	return client.NewElasticClient(elasticsearch.Config{
 		Addresses: []string{url},
+		Username:  username,
+		Password:  password,
 		Logger:    &logging.CustomLogger{},
 	})
 }
@@ -67,7 +78,8 @@ func CreateElasticProcessor(
 		EnableEpochsConfig: config.EnableEpochsConfig{
 			RelayedTransactionsV1V2DisableEpoch: 1,
 		},
-		NumWritesInParallel: 1,
+		NumWritesInParallel:    1,
+		DRWAAuthorizedEmitters: []string{drwaTestEmitter},
 	}
 
 	return factory.CreateElasticProcessor(args)
@@ -89,7 +101,8 @@ func CreateElasticProcessorWithIndexes(
 		EnableEpochsConfig: config.EnableEpochsConfig{
 			RelayedTransactionsV1V2DisableEpoch: 1,
 		},
-		NumWritesInParallel: 1,
+		NumWritesInParallel:    1,
+		DRWAAuthorizedEmitters: []string{drwaTestEmitter},
 	}
 
 	return factory.CreateElasticProcessor(args)
@@ -116,10 +129,28 @@ func getElementFromSlice(path string, index int) string {
 func getIndexMappings(index string) (string, error) {
 	u, _ := url.Parse(esURL)
 	u.Path = path.Join(u.Path, index, "_mappings")
-	res, err := http.Get(u.String())
+
+	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return "", err
 	}
+
+	username := os.Getenv("ELASTIC_USERNAME")
+	if username == "" {
+		username = "elastic"
+	}
+	password := os.Getenv("ELASTIC_PASSWORD")
+	if password == "" {
+		password = "myPassword"
+	}
+	req.SetBasicAuth(username, password)
+
+	httpClient := &http.Client{}
+	res, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {

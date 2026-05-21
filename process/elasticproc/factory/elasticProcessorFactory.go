@@ -1,6 +1,10 @@
 package factory
 
 import (
+	"encoding/hex"
+	"fmt"
+	"strings"
+
 	"github.com/multiversx/mx-chain-core-go/core"
 	"github.com/multiversx/mx-chain-core-go/hashing"
 	"github.com/multiversx/mx-chain-core-go/marshal"
@@ -36,6 +40,8 @@ type ArgElasticProcessorFactory struct {
 	EnableEpochsConfig       config.EnableEpochsConfig
 	UseTemplatesFromFiles    bool
 	ConfigPath               string
+	DRWAAuthorizedEmitters   []string
+	MRVAuthorizedEmitters    []string
 }
 
 // CreateElasticProcessor will create a new instance of ElasticProcessor
@@ -53,6 +59,14 @@ func CreateElasticProcessor(arguments ArgElasticProcessorFactory) (dataindexer.E
 	}
 	if len(enabledIndexesMap) == 0 {
 		return nil, dataindexer.ErrEmptyEnabledIndexes
+	}
+	drwaAuthorizedEmitters, err := parseConfiguredEmitters(arguments.AddressPubkeyConverter, arguments.DRWAAuthorizedEmitters, "DRWA")
+	if err != nil {
+		return nil, err
+	}
+	mrvAuthorizedEmitters, err := parseConfiguredEmitters(arguments.AddressPubkeyConverter, arguments.MRVAuthorizedEmitters, "MRV")
+	if err != nil {
+		return nil, err
 	}
 
 	balanceConverter, err := converters.NewBalanceConverter(arguments.Denomination)
@@ -97,10 +111,12 @@ func CreateElasticProcessor(arguments ArgElasticProcessorFactory) (dataindexer.E
 	}
 
 	argsLogsAndEventsProc := logsevents.ArgsLogsAndEventsProcessor{
-		PubKeyConverter:  arguments.AddressPubkeyConverter,
-		Marshalizer:      arguments.Marshalizer,
-		BalanceConverter: balanceConverter,
-		Hasher:           arguments.Hasher,
+		PubKeyConverter:        arguments.AddressPubkeyConverter,
+		Marshalizer:            arguments.Marshalizer,
+		BalanceConverter:       balanceConverter,
+		Hasher:                 arguments.Hasher,
+		DRWAAuthorizedEmitters: drwaAuthorizedEmitters,
+		MRVAuthorizedEmitters:  mrvAuthorizedEmitters,
 	}
 	logsAndEventsProc, err := logsevents.NewLogsAndEventsProcessor(argsLogsAndEventsProc)
 	if err != nil {
@@ -131,4 +147,31 @@ func CreateElasticProcessor(arguments ArgElasticProcessorFactory) (dataindexer.E
 	}
 
 	return elasticproc.NewElasticProcessor(args)
+}
+
+func parseConfiguredEmitters(converter core.PubkeyConverter, configured []string, label string) ([][]byte, error) {
+	emitters := make([][]byte, 0, len(configured))
+	for _, raw := range configured {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+
+		if strings.HasPrefix(strings.ToLower(value), "0x") {
+			decoded, err := hex.DecodeString(value[2:])
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s authorized emitter %q: %w", label, raw, err)
+			}
+			emitters = append(emitters, decoded)
+			continue
+		}
+
+		decoded, err := converter.Decode(value)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s authorized emitter %q: %w", label, raw, err)
+		}
+		emitters = append(emitters, decoded)
+	}
+
+	return emitters, nil
 }

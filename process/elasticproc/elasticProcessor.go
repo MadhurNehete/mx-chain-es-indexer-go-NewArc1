@@ -138,7 +138,12 @@ func (ei *elasticProcessor) init() error {
 
 func (ei *elasticProcessor) addExtraMappings(extraMappings []templates.ExtraMapping) error {
 	for _, mappingsTuple := range extraMappings {
+		if !ei.isIndexEnabled(mappingsTuple.Index) {
+			continue
+		}
+
 		err := ei.elasticClient.PutMappings(mappingsTuple.Index, mappingsTuple.Mappings)
+
 		if err != nil {
 			log.Warn("cannot add extra mappings", "index", mappingsTuple.Index, "error", err)
 		}
@@ -358,31 +363,32 @@ func (ei *elasticProcessor) RemoveTransactions(header coreData.HeaderHandler, bo
 		return err
 	}
 
-		drwaIndices := []string{
-		elasticIndexer.DrwaDenialsIndex,
-		elasticIndexer.DrwaIdentitiesIndex,
-		elasticIndexer.DrwaHolderComplianceIndex,
-		elasticIndexer.DrwaAttestationsIndex,
-		elasticIndexer.DrwaTokenPoliciesIndex,
-		elasticIndexer.DrwaControlEventsIndex,
-	}
-
-	headerHash, err := ei.blockProc.ComputeHeaderHash(header)
-	if err != nil {
-		return err
-	}
-	blockHashHex := hex.EncodeToString(headerHash)
-
-	for _, index := range drwaIndices {
-		if _, ok := ei.enabledIndexes[index]; !ok {
-			continue
-		}
-		err = ei.removeFromIndexByBlockHashAndShardID(header.GetShardID(), index, blockHashHex)
+	if ei.hasDRWAMRVIndexEnabled() {
+		headerHash, err := ei.blockProc.ComputeHeaderHash(header)
 		if err != nil {
 			return err
 		}
+
+		if err := ei.removeDRWARecordsInCaseOfRevert(header.GetShardID(), hex.EncodeToString(headerHash)); err != nil {
+			return err
+		}
 	}
+
 	return ei.updateDelegatorsInCaseOfRevert(header, body, timestampMs)
+}
+
+func (ei *elasticProcessor) removeDRWARecordsInCaseOfRevert(shardID uint32, blockHash string) error {
+	for _, index := range drwaMRVIndexes() {
+		if !ei.isIndexEnabled(index) {
+			continue
+		}
+
+		if err := ei.removeFromIndexByBlockHashAndShardID(shardID, index, blockHash); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (ei *elasticProcessor) removeFromIndexByBlockHashAndShardID(shardID uint32, index string, blockHash string) error {
@@ -400,8 +406,10 @@ func (ei *elasticProcessor) removeFromIndexByBlockHashAndShardID(shardID uint32,
 	if err != nil {
 		return err
 	}
+
 	return ei.elasticClient.DoQueryRemove(ctxWithValue, index, bytes.NewBuffer(query))
 }
+
 func (ei *elasticProcessor) updateDelegatorsInCaseOfRevert(header coreData.HeaderHandler, body *block.Body, timestampMs uint64) error {
 	// delegators index should be updated in case of revert only if the observer is in Metachain and the reverted block has miniblocks
 	isMeta := header.GetShardID() == core.MetachainShardId
@@ -502,7 +510,7 @@ func (ei *elasticProcessor) SaveMiniblocks(obh *outport.OutportBlockWithHeader) 
 
 // SaveTransactions will prepare and save information about a transactions in elasticsearch server
 func (ei *elasticProcessor) SaveTransactions(obh *outport.OutportBlockWithHeader) error {
-		if check.IfNil(ei.transactionsProc) {
+	if check.IfNil(ei.transactionsProc) {
 		return elasticIndexer.ErrNilTransactionsHandler
 	}
 	if check.IfNil(ei.logsAndEventsProc) {
@@ -517,7 +525,7 @@ func (ei *elasticProcessor) SaveTransactions(obh *outport.OutportBlockWithHeader
 		Epoch:            obh.Header.GetEpoch(),
 		MiniBlockHeaders: obh.Header.GetMiniBlockHeaderHandlers(),
 		NumberOfShards:   obh.NumberOfShards,
-		HeaderHash: obh.BlockData.HeaderHash,
+		HeaderHash:       obh.BlockData.HeaderHash,
 	}
 
 	buffers := data.NewBufferSlice(ei.bulkRequestMaxSize)
@@ -541,6 +549,7 @@ func (ei *elasticProcessor) SaveTransactions(obh *outport.OutportBlockWithHeader
 			NumberOfShards:   obh.NumberOfShards,
 			Epoch:            executionResult.GetHeaderEpoch(),
 			MiniBlockHeaders: converters.GetMiniBlocksHeaderHandlersFromExecResult(executionResult),
+			HeaderHash:       executionResult.GetHeaderHash(),
 		}
 
 		miniBlocks = append(executionResulData.Body.MiniBlocks, executionResulData.IntraShardMiniBlocks...)
@@ -561,7 +570,7 @@ func (ei *elasticProcessor) prepareAndSaveTransactionsData(
 	buffers *data.BufferSlice,
 ) error {
 	preparedResults := ei.transactionsProc.PrepareTransactionsForDatabase(miniBlocks, headerData, pool, ei.isImportDB())
-logsData := ei.logsAndEventsProc.ExtractDataFromLogs(pool.Logs, preparedResults, headerData.ShardID, headerData.NumberOfShards, headerData.TimestampMs, hex.EncodeToString(headerData.HeaderHash), headerData.Round)
+	logsData := ei.logsAndEventsProc.ExtractDataFromLogs(pool.Logs, preparedResults, headerData.ShardID, headerData.NumberOfShards, headerData.TimestampMs, hex.EncodeToString(headerData.HeaderHash), headerData.Round)
 	err := ei.indexTransactions(preparedResults.Transactions, logsData.TxHashStatusInfo, headerData.ShardID, buffers)
 	if err != nil {
 		return err
@@ -586,7 +595,7 @@ logsData := ei.logsAndEventsProc.ExtractDataFromLogs(pool.Logs, preparedResults,
 	if err != nil {
 		return err
 	}
-	
+
 	err = ei.indexLogs(logsData.DBLogs, buffers)
 	if err != nil {
 		return err
@@ -1045,7 +1054,7 @@ func (ei *elasticProcessor) IsInterfaceNil() bool {
 	return ei == nil
 }
 
-//FinalizedBlock will handle the finalized block
+// FinalizedBlock will handle the finalized block
 func (ei *elasticProcessor) FinalizedBlock(finalizedBlock *outport.FinalizedBlock) error {
 	if finalizedBlock == nil {
 		return elasticIndexer.ErrNilFinalizedBlock
@@ -1058,8 +1067,11 @@ func (ei *elasticProcessor) FinalizedBlock(finalizedBlock *outport.FinalizedBloc
 			"lang":   "painless",
 		},
 		"query": map[string]interface{}{
-			"term": map[string]interface{}{
-				"blockHash": hashHex,
+			"bool": map[string]interface{}{
+				"must": []interface{}{
+					map[string]interface{}{"term": map[string]interface{}{"blockHash": hashHex}},
+					map[string]interface{}{"term": map[string]interface{}{"shardID": finalizedBlock.GetShardID()}},
+				},
 			},
 		},
 	})
@@ -1070,16 +1082,8 @@ func (ei *elasticProcessor) FinalizedBlock(finalizedBlock *outport.FinalizedBloc
 	ctxWithValue := context.WithValue(context.Background(), request.ContextKey, request.ExtendTopicWithShardID(request.UpdateTopic, finalizedBlock.GetShardID()))
 	buff := bytes.NewBuffer(query)
 
-	drwaIndices := []string{
-		elasticIndexer.DrwaDenialsIndex,
-		elasticIndexer.DrwaIdentitiesIndex,
-		elasticIndexer.DrwaHolderComplianceIndex,
-		elasticIndexer.DrwaAttestationsIndex,
-		elasticIndexer.DrwaTokenPoliciesIndex,
-		elasticIndexer.DrwaControlEventsIndex,
-	}
-	for _, index := range drwaIndices {
-		if _, ok := ei.enabledIndexes[index]; !ok {
+	for _, index := range drwaMRVIndexes() {
+		if !ei.isIndexEnabled(index) {
 			continue
 		}
 		if err := ei.elasticClient.UpdateByQuery(ctxWithValue, index, bytes.NewBuffer(buff.Bytes())); err != nil {
@@ -1127,6 +1131,34 @@ func (ei *elasticProcessor) indexDRWAData(logsData *data.PreparedLogsResults, bu
 			return err
 		}
 	}
+	if len(logsData.MrvAnchoredProofs) > 0 && ei.isIndexEnabled(elasticIndexer.MrvAnchoredProofsIndex) {
+		err := ei.logsAndEventsProc.SerializeMRVAnchoredProofs(logsData.MrvAnchoredProofs, buffers, elasticIndexer.MrvAnchoredProofsIndex)
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
+}
+
+func drwaMRVIndexes() []string {
+	return []string{
+		elasticIndexer.DrwaDenialsIndex,
+		elasticIndexer.DrwaIdentitiesIndex,
+		elasticIndexer.DrwaHolderComplianceIndex,
+		elasticIndexer.DrwaAttestationsIndex,
+		elasticIndexer.DrwaTokenPoliciesIndex,
+		elasticIndexer.DrwaControlEventsIndex,
+		elasticIndexer.MrvAnchoredProofsIndex,
+	}
+}
+
+func (ei *elasticProcessor) hasDRWAMRVIndexEnabled() bool {
+	for _, index := range drwaMRVIndexes() {
+		if ei.isIndexEnabled(index) {
+			return true
+		}
+	}
+
+	return false
 }

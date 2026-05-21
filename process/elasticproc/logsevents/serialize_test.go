@@ -111,6 +111,32 @@ func TestSerializeTokens(t *testing.T) {
 	require.Equal(t, expectedRes, buffSlice.Buffers()[0].String())
 }
 
+func TestSerializeTokensDRWAUpdateWritesOnlyDRWAProjection(t *testing.T) {
+	t.Parallel()
+
+	token := &data.TokenInfo{
+		Token:      "CARBON-ab12cd",
+		DrwaUpdate: true,
+		Drwa: &data.DrwaTokenInfo{
+			Regulated:          true,
+			PolicyID:           "policy-1",
+			TokenPolicyVersion: 2,
+		},
+	}
+	buffSlice := data.NewBufferSlice(data.DefaultMaxBulkSize)
+
+	err := (&logsAndEventsProcessor{}).SerializeTokens([]*data.TokenInfo{token}, nil, buffSlice, "tokens")
+
+	require.NoError(t, err)
+	require.Len(t, buffSlice.Buffers(), 1)
+	body := buffSlice.Buffers()[0].String()
+	require.Contains(t, body, `{ "update" : { "_index":"tokens", "_id" : "CARBON-ab12cd" } }`)
+	require.Contains(t, body, `ctx._source.drwa.putAll(params.drwa)`)
+	require.Contains(t, body, `"drwa": {"regulated":true,"policyId":"policy-1","tokenPolicyVersion":2}`)
+	require.NotContains(t, body, "drwa_update")
+	require.NotContains(t, body, "drwaUpdate")
+}
+
 func TestLogsAndEventsProcessor_SerializeDelegators(t *testing.T) {
 	t.Parallel()
 
