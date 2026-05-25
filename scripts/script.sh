@@ -106,6 +106,14 @@ start_open_search() {
    -e "discovery.type=single-node" -e "plugins.security.disabled=true" -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
    opensearchproject/opensearch:${OPEN_VERSION}
 
+  echo "Waiting OpenSearch cluster to start..."
+  for _ in $(seq 1 60); do
+    if curl -fsS "http://localhost:9200" > /dev/null; then
+      break
+    fi
+    sleep 1s
+  done
+  docker ps -a
 }
 
 stop_open_search() {
