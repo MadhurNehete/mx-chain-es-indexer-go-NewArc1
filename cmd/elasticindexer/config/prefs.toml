@@ -19,7 +19,13 @@
 
     [config.elastic-cluster]
         url = "http://localhost:9200"
-        username = "elastic"
-        password = "myPassword"
+        # Keep credentials out of source-controlled config. scripts/script.sh
+        # starts Elasticsearch with xpack.security.enabled=true and requires
+        # ELASTIC_PASSWORD. The indexer reads ELASTIC_USERNAME/ELASTIC_PASSWORD
+        # from the environment at startup.
+        username = ""
+        password = ""
+        # Only set true for an intentionally unsecured local cluster.
+        allow-insecure-no-auth-dev = false
         bulk-request-max-size-in-bytes = 4194304 # 4MB
         num-writes-in-parallel = 1

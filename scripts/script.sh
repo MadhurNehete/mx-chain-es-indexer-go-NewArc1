@@ -1,10 +1,48 @@
 IMAGE_NAME=elastic-container
 DEFAULT_ES_VERSION=7.16.2
+DEFAULT_ES_USERNAME=elastic
 PROMETHEUS_CONTAINER_NAME=prometheus_container
 GRAFANA_CONTAINER_NAME=grafana_container
 GRAFANA_VERSION=10.0.3
 PROMETHEUS_VERSION=v2.46.0
-INDICES_LIST=("rating" "transactions" "blocks" "validators" "miniblocks" "rounds" "accounts" "accountshistory" "receipts" "scresults" "accountsesdt" "accountsesdthistory" "epochinfo" "scdeploys" "tokens" "tags" "logs" "delegators" "operations" "esdts" "values" "events" "executionresults""drwa-denials" "drwa-identities" "drwa-holder-compliance" "drwa-attestations" "drwa-token-policies" "drwa-control-events")
+INDICES_LIST=("rating" "transactions" "blocks" "validators" "miniblocks" "rounds" "accounts" "accountshistory" "receipts" "scresults" "accountsesdt" "accountsesdthistory" "epochinfo" "scdeploys" "tokens" "tags" "logs" "delegators" "operations" "esdts" "values" "events" "executionresults" "drwa-denials" "drwa-identities" "drwa-holder-compliance" "drwa-attestations" "drwa-token-policies" "drwa-control-events" "mrv-anchored-proofs")
+
+elastic_username() {
+  if [ -n "${ELASTIC_USERNAME}" ]; then
+    echo "${ELASTIC_USERNAME}"
+    return
+  fi
+
+  echo "${DEFAULT_ES_USERNAME}"
+}
+
+require_elastic_password() {
+  if [ -n "${ELASTIC_PASSWORD}" ]; then
+    return
+  fi
+
+  echo "ELASTIC_PASSWORD must be set before starting or deleting secured Elasticsearch indices."
+  echo "Example: export ELASTIC_PASSWORD='<strong-local-password>'"
+  exit 1
+}
+
+elastic_curl() {
+  NETRC_FILE=$(mktemp)
+  cleanup_netrc() {
+    rm -f "${NETRC_FILE}"
+    trap - RETURN INT TERM
+  }
+  trap cleanup_netrc RETURN INT TERM
+
+  chmod 600 "${NETRC_FILE}"
+  printf "machine localhost login %s password %s\n" "${ES_USERNAME}" "${ELASTIC_PASSWORD}" > "${NETRC_FILE}"
+
+  curl --netrc-file "${NETRC_FILE}" "$@"
+  CURL_STATUS=$?
+  cleanup_netrc
+
+  return ${CURL_STATUS}
+}
 
 
 start() {
@@ -12,16 +50,23 @@ start() {
   if [ -z "${ES_VERSION}" ]; then
     ES_VERSION=${DEFAULT_ES_VERSION}
   fi
+  require_elastic_password
+  ES_USERNAME=$(elastic_username)
 
   docker pull docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
 
   docker rm -f ${IMAGE_NAME} 2> /dev/null
   docker run -d --name "${IMAGE_NAME}" -p 9200:9200  -p 9300:9300 \
-   -e "discovery.type=single-node" -e "xpack.security.enabled=true" -e "ELASTIC_PASSWORD=myPassword" -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+   -e "discovery.type=single-node" -e "xpack.security.enabled=true" -e "ELASTIC_PASSWORD=${ELASTIC_PASSWORD}" -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
     docker.elastic.co/elasticsearch/elasticsearch:${ES_VERSION}
   # Wait elastic cluster to start
   echo "Waiting Elasticsearch cluster to start..."
-  sleep 30s
+  for _ in $(seq 1 60); do
+    if elastic_curl -fsS "http://localhost:9200" > /dev/null; then
+      break
+    fi
+    sleep 1s
+  done
   docker ps -a
 }
 
@@ -30,14 +75,17 @@ stop() {
 }
 
 delete() {
+   require_elastic_password
+   ES_USERNAME=$(elastic_username)
+
    for str in ${INDICES_LIST[@]}; do
-      curl -u elastic:myPassword -XDELETE http://localhost:9200/$str-000001
-      curl -u elastic:myPassword -XDELETE http://localhost:9200/$str
-      curl -u elastic:myPassword -s -o /dev/null -w "%{http_code}" -X GET localhost:9200/_ilm/policy/$str-policy | grep -q 200 && curl -u elastic:myPassword -X DELETE localhost:9200/_ilm/policy/$str-policy
+      elastic_curl -XDELETE http://localhost:9200/$str-000001
+      elastic_curl -XDELETE http://localhost:9200/$str
+      elastic_curl -s -o /dev/null -w "%{http_code}" -X GET localhost:9200/_ilm/policy/$str-policy | grep -q 200 && elastic_curl -X DELETE localhost:9200/_ilm/policy/$str-policy
       echo
    done
 
-  curl -u elastic:myPassword -XDELETE http://localhost:9200/_template/*
+  elastic_curl -XDELETE http://localhost:9200/_template/*
   echo
 }
 

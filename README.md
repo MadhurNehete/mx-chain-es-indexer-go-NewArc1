@@ -97,6 +97,14 @@ CLI: run `--help` to get the command line parameters
 
 Before launching the `elasticindexer` service, it has to be configured so that it runs with the correct configuration.
 
+For a secured local Elasticsearch instance started with `scripts/script.sh`, provide the password through the environment before starting Elasticsearch and the indexer:
+
+```bash
+export ELASTIC_PASSWORD="<strong-local-password>"
+export ELASTIC_USERNAME="elastic" # optional; defaults to elastic when ELASTIC_PASSWORD is set
+./scripts/script.sh start
+```
+
 The **_[prefs.toml](./cmd/elasticindexer/config/prefs.toml)_** file:
 
 ```toml
@@ -122,8 +130,14 @@ The **_[prefs.toml](./cmd/elasticindexer/config/prefs.toml)_** file:
     [config.elastic-cluster]
         use-kibana = false
         url = "http://localhost:9200"
+        # Keep credentials out of source-controlled config. scripts/script.sh
+        # starts Elasticsearch with xpack.security.enabled=true and requires
+        # ELASTIC_PASSWORD. The indexer reads ELASTIC_USERNAME/ELASTIC_PASSWORD
+        # from the environment at startup.
         username = ""
         password = ""
+        # Only set true for an intentionally unsecured local cluster.
+        allow-insecure-no-auth-dev = false
         bulk-request-max-size-in-bytes = 4194304 # 4MB
 ```
 

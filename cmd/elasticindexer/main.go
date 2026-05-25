@@ -53,6 +53,10 @@ VERSION:
 //	go build -v -ldflags="-X main.version=%VERS%"
 var version = "undefined"
 
+const defaultElasticUsername = "elastic"
+const elasticUsernameEnv = "ELASTIC_USERNAME"
+const elasticPasswordEnv = "ELASTIC_PASSWORD"
+
 func main() {
 	app := cli.NewApp()
 	cli.AppHelpTemplate = helpTemplate
@@ -197,12 +201,30 @@ func loadClusterConfig(filepath string) (config.ClusterConfig, error) {
 		return cfg, err
 	}
 
+	applyElasticCredentialsFromEnv(&cfg)
+
 	ec := cfg.Config.ElasticCluster
-	if ec.UserName == "" && ec.Password == "" && !ec.AllowInsecureNoAuthDev {
+	if (ec.UserName == "") != (ec.Password == "") {
+		return cfg, errors.New("elasticsearch username and password must be set together")
+	}
+	if ec.UserName == "" && !ec.AllowInsecureNoAuthDev {
 		return cfg, errors.New("elasticsearch username and password are required (set allow-insecure-no-auth-dev = true to opt out for local development)")
 	}
 
 	return cfg, nil
+}
+
+func applyElasticCredentialsFromEnv(cfg *config.ClusterConfig) {
+	if username := os.Getenv(elasticUsernameEnv); username != "" {
+		cfg.Config.ElasticCluster.UserName = username
+	}
+
+	if password := os.Getenv(elasticPasswordEnv); password != "" {
+		cfg.Config.ElasticCluster.Password = password
+		if cfg.Config.ElasticCluster.UserName == "" {
+			cfg.Config.ElasticCluster.UserName = defaultElasticUsername
+		}
+	}
 }
 
 // loadApiConfig returns a ApiRoutesConfig by reading the config file provided

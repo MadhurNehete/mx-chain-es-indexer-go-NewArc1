@@ -41,9 +41,6 @@ func createESClient(url string) (elasticproc.DatabaseClientHandler, error) {
 		username = "elastic"
 	}
 	password := os.Getenv("ELASTIC_PASSWORD")
-	if password == "" {
-		password = "myPassword"
-	}
 
 	return client.NewElasticClient(elasticsearch.Config{
 		Addresses: []string{url},
@@ -78,8 +75,9 @@ func CreateElasticProcessor(
 		EnableEpochsConfig: config.EnableEpochsConfig{
 			RelayedTransactionsV1V2DisableEpoch: 1,
 		},
-		NumWritesInParallel:    1,
+		NumWritesInParallel: 1,
 		DRWAAuthorizedEmitters: []string{drwaTestEmitter},
+		
 	}
 
 	return factory.CreateElasticProcessor(args)
@@ -101,7 +99,7 @@ func CreateElasticProcessorWithIndexes(
 		EnableEpochsConfig: config.EnableEpochsConfig{
 			RelayedTransactionsV1V2DisableEpoch: 1,
 		},
-		NumWritesInParallel:    1,
+		NumWritesInParallel: 1,
 		DRWAAuthorizedEmitters: []string{drwaTestEmitter},
 	}
 
@@ -130,7 +128,7 @@ func getIndexMappings(index string) (string, error) {
 	u, _ := url.Parse(esURL)
 	u.Path = path.Join(u.Path, index, "_mappings")
 
-	req, err := http.NewRequest("GET", u.String(), nil)
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
 		return "", err
 	}
@@ -140,17 +138,14 @@ func getIndexMappings(index string) (string, error) {
 		username = "elastic"
 	}
 	password := os.Getenv("ELASTIC_PASSWORD")
-	if password == "" {
-		password = "myPassword"
+	if password != "" {
+		req.SetBasicAuth(username, password)
 	}
-	req.SetBasicAuth(username, password)
 
-	httpClient := &http.Client{}
-	res, err := httpClient.Do(req)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
